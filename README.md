@@ -1,6 +1,6 @@
 # Prime Server
 
-A simple HTTP server written in Rust, for my own learning experience.
+A simple HTTP/1.1 server written in Rust, for my own learning experience.
 
 ## Installation
 

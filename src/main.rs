@@ -1,39 +1,83 @@
 use std::{
-    io::{self, BufRead as _, Write as _},
-    net,
+    io::{self, BufReader, Write as _},
+    net::TcpListener,
 };
 
+use prime_server::request::{Request, RequestParseError};
+
 fn main() -> io::Result<()> {
-    let listener = net::TcpListener::bind("127.0.0.1:8080")?;
+    let listener = TcpListener::bind("127.0.0.1:8080")?;
 
     for stream in listener.incoming() {
-        handle_connection(stream?)?;
-    }
+        match stream {
+            Ok(mut stream) => {
+                let mut reader = BufReader::new(&stream);
 
-    Ok(())
-}
+                let request = Request::parse(&mut reader);
+                match request {
+                    Ok(request) => {
+                        println!("{:#?}", request);
 
-pub fn handle_connection(stream: net::TcpStream) -> io::Result<()> {
-    let mut reader = io::BufReader::new(stream);
+                        let response = "HTTP/1.1 200 OK\r\n\r\n";
+                        stream.write_all(response.as_bytes())?;
+                        stream.flush()?;
+                    }
+                    Err(e) => {
+                        let response = match e {
+                            RequestParseError::LengthRequired => {
+                                let message = "Request must have a Content-Length header.";
 
-    for line in (&mut reader).lines() {
-        let line = line?;
-        println!("{line}");
+                                format!(
+                                    "HTTP/1.1 411 Length Required\r\n\
+                                     Content-Type: text/plain\r\n\
+                                     Content-Length: {}\r\n\
+                                     \r\n\
+                                     {}\r\n\
+                                     \r\n",
+                                    message.len(),
+                                    message
+                                )
+                            }
+                            RequestParseError::UnsupportedContentType => {
+                                let message =
+                                    "Only `Content-Type: text/plain` is supported for now.";
 
-        // Empty line means we reached \r\n\r\n
-        if line == "" {
-            break;
+                                format!(
+                                    "HTTP/1.1 501 Not Implemented\r\n\
+                                     Content-Type: text/plain\r\n\
+                                     Content-Length: {}\r\n\
+                                     \r\n\
+                                     {}\r\n\
+                                     \r\n",
+                                    message.len(),
+                                    message
+                                )
+                            }
+                            RequestParseError::UnsupportedTransferEncoding(_) => {
+                                let message = "Header `Transfer-Encoding` is not yet supported.";
+
+                                format!(
+                                    "HTTP/1.1 501 Not Implemented\r\n\
+                                     Content-Type: text/plain\r\n\
+                                     Content-Length: {}\r\n\
+                                     \r\n\
+                                     {}\r\n\
+                                     \r\n",
+                                    message.len(),
+                                    message
+                                )
+                            }
+                            _ => "HTTP/1.1 400 Bad Request\r\n\r\n".to_owned(),
+                        };
+
+                        stream.write_all(response.as_bytes())?;
+                        stream.flush()?;
+                    }
+                }
+            }
+            Err(e) => eprintln!("An error occurred on the stream : {:#?}", e),
         }
     }
-
-    let mut s = reader.into_inner();
-    s.shutdown(net::Shutdown::Read)?;
-
-    let response = "HTTP/1.1 200 OK\r\n\r\n";
-    s.write_all(response.as_bytes())?;
-
-    s.flush()?;
-    s.shutdown(net::Shutdown::Write)?;
 
     Ok(())
 }

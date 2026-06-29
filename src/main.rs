@@ -1,39 +1,41 @@
 use std::{
-    io::{self, BufRead as _, Write as _},
-    net,
+    io::{self, BufReader, Write as _},
+    net::{Shutdown, TcpListener},
 };
 
+use prime_server::request::Request;
+
 fn main() -> io::Result<()> {
-    let listener = net::TcpListener::bind("127.0.0.1:8080")?;
+    let listener = TcpListener::bind("127.0.0.1:8080")?;
 
     for stream in listener.incoming() {
-        handle_connection(stream?)?;
-    }
+        match stream {
+            Ok(mut stream) => {
+                let mut reader = BufReader::new(&stream);
 
-    Ok(())
-}
+                let request = Request::parse(&mut reader);
+                match request {
+                    Ok(request) => println!("{:#?}", request),
+                    Err(e) => {
+                        eprintln!(
+                            "An error occurred while parsing the HTTP request : {:#?}",
+                            e
+                        )
+                    }
+                }
 
-pub fn handle_connection(stream: net::TcpStream) -> io::Result<()> {
-    let mut reader = io::BufReader::new(stream);
+                // After parsing request, no need to read anymore
+                stream.shutdown(Shutdown::Read)?;
 
-    for line in (&mut reader).lines() {
-        let line = line?;
-        println!("{line}");
+                let response = "HTTP/1.1 200 OK\r\n\r\n";
+                stream.write_all(response.as_bytes())?;
 
-        // Empty line means we reached \r\n\r\n
-        if line == "" {
-            break;
+                stream.flush()?;
+                stream.shutdown(Shutdown::Write)?;
+            }
+            Err(e) => eprintln!("An error occurred on the stream : {:#?}", e),
         }
     }
-
-    let mut s = reader.into_inner();
-    s.shutdown(net::Shutdown::Read)?;
-
-    let response = "HTTP/1.1 200 OK\r\n\r\n";
-    s.write_all(response.as_bytes())?;
-
-    s.flush()?;
-    s.shutdown(net::Shutdown::Write)?;
 
     Ok(())
 }

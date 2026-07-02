@@ -1,6 +1,3 @@
-[package]
-name = "prime-server"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
+[workspace]
+members = ["prime_http", "prime_server"]
+resolver = "2"

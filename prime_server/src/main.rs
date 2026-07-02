@@ -3,7 +3,11 @@ use std::{
     net::TcpListener,
 };
 
-use prime_server::request::{Request, RequestParseError};
+use prime_http::{
+    request::{Request, RequestParseError},
+    response::{Response, StringResponseBodyPayload},
+    status_code::StatusCode,
+};
 
 fn main() -> io::Result<()> {
     let listener = TcpListener::bind("127.0.0.1:8080")?;
@@ -23,8 +27,16 @@ fn main() -> io::Result<()> {
                         stream.flush()?;
                     }
                     Err(e) => {
-                        let response = match e {
+                        let response = Response::default();
+
+                        match e {
                             RequestParseError::LengthRequired => {
+                                response.status = StatusCode::LengthRequired;
+                                response.set_header("Content-Type", "text/plain");
+                                response.set_body(Some(Box::new(StringResponseBodyPayload::new(
+                                    "hello world",
+                                ))));
+
                                 let message = "Request must have a Content-Length header.";
 
                                 format!(

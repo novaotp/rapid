@@ -3,5 +3,12 @@
 version = 4
 
 [[package]]
-name = "prime-server"
+name = "prime_http"
 version = "0.1.0"
+
+[[package]]
+name = "prime_server"
+version = "0.1.0"
+dependencies = [
+ "prime_http",
+]

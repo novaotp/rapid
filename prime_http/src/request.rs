@@ -10,11 +10,11 @@ use crate::http_method::{HttpMethod, InvalidHttpMethodError};
 
 #[derive(Debug)]
 pub enum QueryValue {
-    String(String),
-    Vec(Vec<String>),
+    Single(String),
+    Many(Vec<String>),
 }
 
-/// A struct representing an HTTP request.
+/// An HTTP request.
 #[derive(Debug)]
 pub struct Request {
     pub method: HttpMethod,
@@ -133,20 +133,20 @@ fn get_query(query_string: &str) -> HashMap<String, QueryValue> {
             query
                 .entry(key.to_owned())
                 .and_modify(|e| match e {
-                    QueryValue::Vec(v) => v.push(val.to_owned()),
-                    QueryValue::String(_) => panic!("Impossible !"),
+                    QueryValue::Many(v) => v.push(val.to_owned()),
+                    QueryValue::Single(_) => panic!("Impossible !"),
                 })
-                .or_insert(QueryValue::Vec(vec![val.to_owned()]));
+                .or_insert(QueryValue::Many(vec![val.to_owned()]));
         } else {
             query
                 .entry(key.to_owned())
                 .and_modify(|e| match e {
-                    QueryValue::String(_) => {
-                        *e = QueryValue::String(val.to_owned());
+                    QueryValue::Single(_) => {
+                        *e = QueryValue::Single(val.to_owned());
                     }
-                    QueryValue::Vec(_) => panic!("Impossible !"),
+                    QueryValue::Many(_) => panic!("Impossible !"),
                 })
-                .or_insert(QueryValue::String(val.to_owned()));
+                .or_insert(QueryValue::Single(val.to_owned()));
         }
     }
 
@@ -220,11 +220,12 @@ fn read_body_with_content_length<T: io::Read>(
     Ok(Some(body))
 }
 
+/// All errors that can arise from [Request::parse].
 #[derive(Debug)]
 pub enum RequestParseError {
     /// An error occurred while reading the HTTP request.
     Read(io::Error),
-    /// An error occurred while converting the body Vec<u8> to UTF-8.
+    /// An error occurred while converting the body `Vec<u8>` to UTF-8.
     InvalidBodyEncoding(FromUtf8Error),
     /// An invalid method was encountered.
     InvalidHttpMethod(InvalidHttpMethodError),

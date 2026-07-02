@@ -71,7 +71,11 @@ pub enum StatusCode {
 }
 
 impl StatusCode {
-    pub fn as_str(self) -> &'static str {
+    pub fn code(&self) -> u16 {
+        *self as u16
+    }
+
+    pub fn as_str(&self) -> &'static str {
         match self {
             Self::Continue => "Continue",
             Self::SwitchingProtocols => "Switching Protocols",

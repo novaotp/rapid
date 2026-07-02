@@ -121,32 +121,36 @@ fn read_start_line<T: io::Read>(
 fn get_query(query_string: &str) -> HashMap<String, QueryValue> {
     let mut query: HashMap<String, QueryValue> = HashMap::new();
 
+    if query_string.is_empty() {
+        return query;
+    }
+
     for item in query_string.split('&') {
-        let (key, val) = item.split_once('=').unwrap_or((item, ""));
+        if let Some((key, val)) = item.split_once('=') {
+            if key.ends_with("[]") || key.ends_with("%5B%5D") {
+                let key = key
+                    .strip_suffix("[]")
+                    .or_else(|| key.strip_suffix("%5B%5D"))
+                    .unwrap_or(key);
 
-        if key.ends_with("[]") || key.ends_with("%5B%5D") {
-            let key = key
-                .strip_suffix("[]")
-                .or_else(|| key.strip_suffix("%5B%5D"))
-                .unwrap_or(key);
-
-            query
-                .entry(key.to_owned())
-                .and_modify(|e| match e {
-                    QueryValue::Many(v) => v.push(val.to_owned()),
-                    QueryValue::Single(_) => panic!("Impossible !"),
-                })
-                .or_insert(QueryValue::Many(vec![val.to_owned()]));
-        } else {
-            query
-                .entry(key.to_owned())
-                .and_modify(|e| match e {
-                    QueryValue::Single(_) => {
-                        *e = QueryValue::Single(val.to_owned());
-                    }
-                    QueryValue::Many(_) => panic!("Impossible !"),
-                })
-                .or_insert(QueryValue::Single(val.to_owned()));
+                query
+                    .entry(key.to_owned())
+                    .and_modify(|e| match e {
+                        QueryValue::Many(v) => v.push(val.to_owned()),
+                        QueryValue::Single(_) => panic!("Impossible !"),
+                    })
+                    .or_insert(QueryValue::Many(vec![val.to_owned()]));
+            } else {
+                query
+                    .entry(key.to_owned())
+                    .and_modify(|e| match e {
+                        QueryValue::Single(_) => {
+                            *e = QueryValue::Single(val.to_owned());
+                        }
+                        QueryValue::Many(_) => panic!("Impossible !"),
+                    })
+                    .or_insert(QueryValue::Single(val.to_owned()));
+            }
         }
     }
 

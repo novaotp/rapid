@@ -7,8 +7,16 @@ name = "prime_http"
 version = "0.1.0"
 
 [[package]]
+name = "prime_middlewares"
+version = "0.1.0"
+dependencies = [
+ "prime_http",
+]
+
+[[package]]
 name = "prime_server"
 version = "0.1.0"
 dependencies = [
  "prime_http",
+ "prime_middlewares",
 ]

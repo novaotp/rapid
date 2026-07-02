@@ -1,49 +1,30 @@
+use core::fmt;
 use std::collections::HashMap;
 
 use crate::status_code::StatusCode;
 
 /// A valid body payload for a response.
-pub trait ResponseBodyPayload: std::fmt::Debug + Clone {
+pub trait ResponseBodyPayload: std::fmt::Debug {
     /// A string representation of the payload.
     fn as_str(&self) -> &str;
 
     /// The `Content-Type` of the payload.
     fn get_content_type(&self) -> &str;
 
-    /// Converts the payload to an optional boxed payload.
-    fn as_body(&self) -> Option<Box<Self>>;
-}
+    /// Whether the body payload is empty or not.
+    fn is_empty(&self) -> bool;
 
-#[derive(Debug)]
-pub struct StringResponseBodyPayload(pub String);
-
-impl StringResponseBodyPayload {
-    pub fn new(payload: impl Into<String>) -> Self {
-        StringResponseBodyPayload(payload.into())
-    }
-}
-
-impl ResponseBodyPayload for StringResponseBodyPayload {
-    fn get_content_type(&self) -> &str {
-        "text/plain"
-    }
-
-    fn as_str(&self) -> &str {
-        &self.0
-    }
-
-    fn as_body(&self) -> Option<Box<Self>> {
-        Some(Box::new(self.clone()))
-    }
+    /// The length of the body payload when sent.
+    fn len(&self) -> usize;
 }
 
 /// An HTTP response.
 #[derive(Debug)]
-pub struct Response<T: ResponseBodyPayload> {
+pub struct Response {
     pub version: String,
     pub status: StatusCode,
     pub headers: HashMap<String, String>,
-    pub body: Option<Box<T>>,
+    pub body: Option<Box<dyn ResponseBodyPayload>>,
 }
 
 impl Response {
@@ -67,7 +48,9 @@ impl Response {
 
     /// Sets the body of the response.
     ///
-    /// If the `Content-Type` header is not set, it is inferred from the new body.
+    /// If the following headers are not set, they will be inferred from the new body :
+    /// - `Content-Type`
+    /// - `Content-Length`
     ///
     /// # Examples
     ///
@@ -78,13 +61,17 @@ impl Response {
     /// assert_eq!(response.headers.get("Content-Type"), None);
     /// response.set_body()
     /// ```
-    pub fn set_body(&mut self, body: Option<Box<dyn ResponseBodyPayload>>) {
-        self.body = body;
+    pub fn set_body(&mut self, body: Box<dyn ResponseBodyPayload>) {
+        self.body = Some(body);
 
         if let Some(body) = &self.body {
             self.headers
-                .entry("Content-Type".to_owned())
-                .or_insert(body.content_type().to_owned());
+                .entry(String::from("Content-Type"))
+                .or_insert(body.get_content_type().to_owned());
+
+            self.headers
+                .entry(String::from("Content-Length"))
+                .or_insert(body.len().to_string());
         }
     }
 }
@@ -97,5 +84,29 @@ impl Default for Response {
             headers: HashMap::new(),
             body: None,
         }
+    }
+}
+
+impl fmt::Display for Response {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} {} {}\r\n",
+            self.version,
+            self.status.code(),
+            self.status.as_str()
+        )?;
+
+        for (key, val) in &self.headers {
+            write!(f, "{}: {}\r\n", key, val)?;
+        }
+
+        write!(f, "\r\n")?;
+
+        if let Some(body) = &self.body {
+            write!(f, "{}", body.as_str())?;
+        }
+
+        write!(f, "\r\n")
     }
 }

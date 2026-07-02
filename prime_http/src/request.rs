@@ -14,6 +14,12 @@ pub enum QueryValue {
     Many(Vec<String>),
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum HeaderValue {
+    Single(String),
+    Many(Vec<String>),
+}
+
 /// An HTTP request.
 #[derive(Debug)]
 pub struct Request {
@@ -21,7 +27,7 @@ pub struct Request {
     pub path: String,
     pub version: String,
     pub query: HashMap<String, QueryValue>,
-    pub headers: HashMap<String, String>,
+    pub headers: HashMap<String, HeaderValue>,
     pub body: Option<String>,
 }
 
@@ -159,7 +165,7 @@ fn get_query(query_string: &str) -> HashMap<String, QueryValue> {
 
 fn read_headers<T: io::Read>(
     reader: &mut BufReader<T>,
-) -> Result<HashMap<String, String>, RequestParseError> {
+) -> Result<HashMap<String, HeaderValue>, RequestParseError> {
     let mut headers = HashMap::new();
     let mut line = String::new();
 
@@ -173,7 +179,12 @@ fn read_headers<T: io::Read>(
         }
 
         if let Some((key, val)) = trimmed.split_once(": ") {
-            headers.insert(key.to_owned(), val.to_owned());
+            let values: HeaderValue = match val.split(", ").collect::<Vec<&str>>() {
+                values if values.len() == 1 => HeaderValue::Single(values[0].to_owned()),
+                values => HeaderValue::Many(values.iter().map(|str| str.to_string()).collect()),
+            };
+
+            headers.insert(key.to_owned(), values);
         }
     }
 
@@ -183,7 +194,7 @@ fn read_headers<T: io::Read>(
 fn get_body<T: io::Read>(
     reader: &mut BufReader<T>,
     method: &HttpMethod,
-    headers: &HashMap<String, String>,
+    headers: &HashMap<String, HeaderValue>,
 ) -> Result<Option<String>, RequestParseError> {
     if !method.allows_body() {
         Ok(None)
@@ -319,7 +330,10 @@ mod tests {
 
         assert_eq!(
             read_headers(&mut reader)?,
-            HashMap::from([(String::from("Content-Type"), String::from("text/plain"))])
+            HashMap::from([(
+                String::from("Content-Type"),
+                HeaderValue::Single(String::from("text/plain"))
+            )])
         );
 
         Ok(())
@@ -336,9 +350,18 @@ mod tests {
         assert_eq!(
             read_headers(&mut reader)?,
             HashMap::from([
-                (String::from("Accept"), String::from("application/json")),
-                (String::from("Content-Type"), String::from("text/plain")),
-                (String::from("Content-Length"), String::from("11"))
+                (
+                    String::from("Accept"),
+                    HeaderValue::Single(String::from("application/json"))
+                ),
+                (
+                    String::from("Content-Type"),
+                    HeaderValue::Single(String::from("text/plain"))
+                ),
+                (
+                    String::from("Content-Length"),
+                    HeaderValue::Single(String::from("11"))
+                )
             ])
         );
 
@@ -355,7 +378,10 @@ mod tests {
 
         assert_eq!(
             read_headers(&mut reader)?,
-            HashMap::from([(String::from("Content-Length"), String::from("11"))])
+            HashMap::from([(
+                String::from("Content-Length"),
+                HeaderValue::Single(String::from("11"))
+            )])
         );
 
         Ok(())

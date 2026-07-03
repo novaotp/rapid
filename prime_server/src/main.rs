@@ -19,7 +19,10 @@ fn main() -> io::Result<()> {
                 let mut reader = BufReader::new(&stream);
 
                 let request = Request::parse(&mut reader);
+                println!("{:#?}", request);
+
                 let response = create_response(&request);
+                println!("{:#?}", response);
 
                 stream.write_all(response.to_string().as_bytes())?;
                 stream.flush()?;
@@ -35,9 +38,7 @@ fn create_response(request: &Result<Request, RequestParseError>) -> Response {
     let mut response = Response::default();
 
     match request {
-        Ok(request) => {
-            println!("{:#?}", request);
-        }
+        Ok(_) => response.status = StatusCode::NoContent,
         Err(e) => {
             match e {
                 RequestParseError::LengthRequired => {
@@ -58,9 +59,7 @@ fn create_response(request: &Result<Request, RequestParseError>) -> Response {
                         "Header `Transfer-Encoding` is not yet supported.",
                     )));
                 }
-                _ => {
-                    response.status = StatusCode::BadRequest;
-                }
+                _ => response.status = StatusCode::BadRequest,
             };
         }
     }

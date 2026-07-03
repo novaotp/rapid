@@ -1,5 +1,7 @@
+use core::fmt;
 use std::{
     collections::HashMap,
+    convert::Infallible,
     io::{self, BufRead as _, BufReader, Read as _},
     num::ParseIntError,
     str::FromStr,
@@ -18,6 +20,30 @@ pub enum QueryValue {
 pub enum HeaderValue {
     Single(String),
     Many(Vec<String>),
+}
+
+impl fmt::Display for HeaderValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self {
+            Self::Single(s) => write!(f, "{}", s),
+            Self::Many(vec) => write!(f, "{}", vec.join(", ")),
+        }
+    }
+}
+
+impl FromStr for HeaderValue {
+    type Err = Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let values: Vec<&str> = s.split(", ").collect();
+
+        match values.len() {
+            len if len > 1 => Ok(HeaderValue::Many(
+                values.iter().map(|str| str.to_string()).collect(),
+            )),
+            _ => Ok(HeaderValue::Single(values[0].to_owned())),
+        }
+    }
 }
 
 /// An HTTP request.
@@ -69,6 +95,7 @@ impl Request {
     ///         (String::from("Content-Length"), String::from("11"))
     ///     ])
     /// );
+    /// assert_eq!(request.query, HashMap::new());
     /// assert_eq!(request.body, Some(String::from("Hello World")));
     /// # Ok(())
     /// # }
@@ -89,7 +116,7 @@ impl Request {
         };
 
         let headers = read_headers(reader)?;
-        let query = get_query(&query_string);
+        let query = parse_query_string(&query_string);
         let body = get_body(reader, &method, &headers)?;
 
         Ok(Request {
@@ -124,7 +151,7 @@ fn read_start_line<T: io::Read>(
     }
 }
 
-fn get_query(query_string: &str) -> HashMap<String, QueryValue> {
+fn parse_query_string(query_string: &str) -> HashMap<String, QueryValue> {
     let mut query: HashMap<String, QueryValue> = HashMap::new();
 
     if query_string.is_empty() {
@@ -200,21 +227,28 @@ fn get_body<T: io::Read>(
         Ok(None)
     } else if let Some(value) = headers.get("Transfer-Encoding") {
         Err(RequestParseError::UnsupportedTransferEncoding(
-            value.clone(),
+            value.to_string(),
         ))
     } else {
-        let length = headers
+        match headers
             .get("Content-Length")
             .ok_or(RequestParseError::LengthRequired)?
-            .parse::<usize>()?;
+        {
+            HeaderValue::Single(length) => {
+                let length = length.parse::<usize>()?;
 
-        match read_body_with_content_length(reader, length)? {
-            Some(body) => match headers.get("Content-Type") {
-                Some(content_type) if content_type.as_str() == "text/plain" => Ok(Some(body)),
-                Some(_) => Err(RequestParseError::UnsupportedContentType),
-                None => Ok(Some(body)),
-            },
-            None => Ok(None),
+                match read_body_with_content_length(reader, length)? {
+                    Some(body) => match headers.get("Content-Type") {
+                        Some(content_type) if content_type.to_string().as_str() == "text/plain" => {
+                            Ok(Some(body))
+                        }
+                        Some(_) => Err(RequestParseError::UnsupportedContentType),
+                        None => Ok(Some(body)),
+                    },
+                    None => Ok(None),
+                }
+            }
+            HeaderValue::Many(_) => Err(RequestParseError::InvalidHeaderValue),
         }
     }
 }
@@ -256,6 +290,10 @@ pub enum RequestParseError {
     LengthRequired,
     /// Currently, only `Content-Type: text/plain` is supported.
     UnsupportedContentType,
+    /// When an invalid header value is received.
+    ///
+    /// For example, `Content-Length: 12, 12` is invalid.
+    InvalidHeaderValue,
 }
 
 impl From<io::Error> for RequestParseError {

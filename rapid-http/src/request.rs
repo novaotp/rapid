@@ -19,10 +19,12 @@ use std::{
     io::{self, BufRead as _, BufReader},
 };
 
+use crate::method::Method;
+
 /// An HTTP request.
 #[derive(Debug)]
 pub struct Request {
-    pub method: String,
+    pub method: Method,
     pub path: String,
     pub version: String,
 }
@@ -33,16 +35,17 @@ impl Request {
     /// # Examples
     ///
     /// ```rust
-    /// # use std::io::BufReader;
-    /// # use rapid_http::request::{Request, RequestError};
-    /// # fn try_main() -> Result<(), RequestError> {
+    /// use std::io::BufReader;
+    /// use rapid_http::{method::Method, request::Request};
+    ///
+    /// # fn try_main() -> Result<(), rapid_http::request::RequestError> {
     /// let data = b"GET / HTTP/1.1\r\n\
     ///              \r\n";
     /// let mut reader = BufReader::new(&data[..]);
     ///
     /// let request = Request::from_reader(&mut reader)?;
     ///
-    /// assert_eq!(request.method, String::from("GET"));
+    /// assert_eq!(request.method, Method::GET);
     /// assert_eq!(request.path, String::from("/"));
     /// assert_eq!(request.version, String::from("HTTP/1.1"));
     /// # Ok(())
@@ -68,13 +71,16 @@ impl Request {
 
 fn read_start_line<T: io::Read>(
     reader: &mut BufReader<T>,
-) -> Result<(String, String, String), RequestError> {
+) -> Result<(Method, String, String), RequestError> {
     let mut line = String::new();
     reader.read_line(&mut line)?;
 
     match line.split_whitespace().collect::<Vec<&str>>().as_slice() {
         [method_str, path_str, version_str] => {
-            let method = method_str.to_string();
+            let method = method_str
+                .parse::<Method>()
+                .map_err(|_| RequestError::InvalidMethod)?;
+
             let path = path_str.to_string();
             let version = version_str.to_string();
 
@@ -91,6 +97,8 @@ pub enum RequestError {
     Read(io::Error),
     /// The HTTP version used is not supported OR the request line was improperly formed.
     UnsupportedHttpVersion,
+    /// The HTTP method in the request line is not supported.
+    InvalidMethod,
 }
 
 impl From<io::Error> for RequestError {
@@ -110,11 +118,7 @@ mod tests {
 
         assert_eq!(
             read_start_line(&mut reader)?,
-            (
-                String::from("GET"),
-                String::from("/"),
-                String::from("HTTP/1.1")
-            )
+            (Method::GET, String::from("/"), String::from("HTTP/1.1"))
         );
 
         Ok(())

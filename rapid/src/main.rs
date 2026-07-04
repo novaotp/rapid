@@ -38,6 +38,9 @@ fn main() -> io::Result<()> {
                         RequestError::UnsupportedHttpVersion => {
                             String::from("HTTP/1.1 505 HTTP Version Not Supported\r\n\r\n")
                         }
+                        RequestError::InvalidMethod => {
+                            String::from("HTTP/1.1 405 Method Not Allowed\r\n\r\n")
+                        }
                         RequestError::Read(_) => String::from("HTTP/1.1 400 Bad Request\r\n\r\n"),
                     },
                 };

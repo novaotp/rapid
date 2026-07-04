@@ -19,14 +19,14 @@ use std::{
     io::{self, BufRead as _, BufReader},
 };
 
-use crate::method::Method;
+use crate::{method::Method, version::Version};
 
 /// An HTTP request.
 #[derive(Debug)]
 pub struct Request {
     pub method: Method,
     pub path: String,
-    pub version: String,
+    pub version: Version,
 }
 
 impl Request {
@@ -36,7 +36,7 @@ impl Request {
     ///
     /// ```rust
     /// use std::io::BufReader;
-    /// use rapid_http::{method::Method, request::Request};
+    /// use rapid_http::{method::Method, request::Request, version::Version};
     ///
     /// # fn try_main() -> Result<(), rapid_http::request::RequestError> {
     /// let data = b"GET / HTTP/1.1\r\n\
@@ -47,7 +47,7 @@ impl Request {
     ///
     /// assert_eq!(request.method, Method::GET);
     /// assert_eq!(request.path, String::from("/"));
-    /// assert_eq!(request.version, String::from("HTTP/1.1"));
+    /// assert_eq!(request.version, Version::HTTP1_1);
     /// # Ok(())
     /// # }
     /// # fn main() {
@@ -71,7 +71,7 @@ impl Request {
 
 fn read_start_line<T: io::Read>(
     reader: &mut BufReader<T>,
-) -> Result<(Method, String, String), RequestError> {
+) -> Result<(Method, String, Version), RequestError> {
     let mut line = String::new();
     reader.read_line(&mut line)?;
 
@@ -82,7 +82,10 @@ fn read_start_line<T: io::Read>(
                 .map_err(|_| RequestError::InvalidMethod)?;
 
             let path = path_str.to_string();
-            let version = version_str.to_string();
+
+            let version = version_str
+                .parse::<Version>()
+                .map_err(|_| RequestError::UnsupportedHttpVersion)?;
 
             Ok((method, path, version))
         }
@@ -118,7 +121,7 @@ mod tests {
 
         assert_eq!(
             read_start_line(&mut reader)?,
-            (Method::GET, String::from("/"), String::from("HTTP/1.1"))
+            (Method::GET, String::from("/"), Version::HTTP1_1)
         );
 
         Ok(())

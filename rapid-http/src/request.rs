@@ -16,10 +16,11 @@
 
 use std::{
     assert_matches,
+    collections::HashMap,
     io::{self, BufRead as _, BufReader},
 };
 
-use crate::{method::Method, version::Version};
+use crate::{header::HeaderValue, method::Method, version::Version};
 
 /// An HTTP request.
 #[derive(Debug)]
@@ -27,6 +28,7 @@ pub struct Request {
     pub method: Method,
     pub path: String,
     pub version: Version,
+    pub headers: HashMap<String, HeaderValue>,
 }
 
 impl Request {
@@ -36,10 +38,18 @@ impl Request {
     ///
     /// ```rust
     /// use std::io::BufReader;
-    /// use rapid_http::{method::Method, request::Request, version::Version};
+    /// use std::collections::HashMap;
+    /// use rapid_http::{
+    ///     header::HeaderValue,
+    ///     method::Method,
+    ///     request::Request,
+    ///     version::Version
+    /// };
     ///
     /// # fn try_main() -> Result<(), rapid_http::request::RequestError> {
     /// let data = b"GET / HTTP/1.1\r\n\
+    ///              Host: example.com
+    ///              Accept: text/plain, application/json
     ///              \r\n";
     /// let mut reader = BufReader::new(&data[..]);
     ///
@@ -48,6 +58,22 @@ impl Request {
     /// assert_eq!(request.method, Method::GET);
     /// assert_eq!(request.path, String::from("/"));
     /// assert_eq!(request.version, Version::HTTP1_1);
+    /// assert_eq!(
+    ///     request.headers,
+    ///     HashMap::from([
+    ///         (
+    ///             String::from("Host"),
+    ///             HeaderValue::Single(String::from("example.com"))
+    ///         ),
+    ///         (
+    ///             String::from("Accept"),
+    ///             HeaderValue::Many(vec![
+    ///                 String::from("text/plain"),
+    ///                 String::from("application/json")
+    ///             ])
+    ///         )
+    ///     ])
+    /// );
     /// # Ok(())
     /// # }
     /// # fn main() {
@@ -60,11 +86,13 @@ impl Request {
     /// See [RequestError] for more details.
     pub fn from_reader<T: io::Read>(reader: &mut BufReader<T>) -> Result<Self, RequestError> {
         let (method, path, version) = read_start_line(reader)?;
+        let headers = read_headers(reader)?;
 
         Ok(Request {
             method,
             path,
             version,
+            headers,
         })
     }
 }
@@ -93,6 +121,36 @@ fn read_start_line<T: io::Read>(
     }
 }
 
+fn read_headers<T: io::Read>(
+    reader: &mut BufReader<T>,
+) -> Result<HashMap<String, HeaderValue>, RequestError> {
+    let mut headers = HashMap::new();
+    let mut line = String::new();
+
+    loop {
+        line.clear();
+        reader.read_line(&mut line)?;
+
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            break;
+        }
+
+        if let Some((k, v)) = trimmed.split_once(":") {
+            let key = k.trim().to_owned();
+            let value = v
+                .parse::<HeaderValue>()
+                .map_err(|_| RequestError::InvalidHeaderValue)?;
+
+            headers.insert(key, value);
+        } else {
+            return Err(RequestError::InvalidHeaderValue);
+        }
+    }
+
+    Ok(headers)
+}
+
 /// All errors that can arise from [Request::parse].
 #[derive(Debug)]
 pub enum RequestError {
@@ -102,6 +160,11 @@ pub enum RequestError {
     UnsupportedHttpVersion,
     /// The HTTP method in the request line is not supported.
     InvalidMethod,
+    /// When an invalid header value is received. For example,
+    /// - `Content-Length: 12, 12` is invalid because it only accepts one value.
+    /// - `Host:` is invalid because there is no  value after the colon.
+    /// - `X-Rapid-Server` is invalid because there is no colon.
+    InvalidHeaderValue,
 }
 
 impl From<io::Error> for RequestError {
@@ -135,6 +198,99 @@ mod tests {
         assert_matches!(
             read_start_line(&mut reader),
             Err(RequestError::UnsupportedHttpVersion)
+        );
+    }
+
+    #[test]
+    fn test_read_headers_single_header_valid() -> Result<(), RequestError> {
+        let data = b"Content-Type: text/plain\r\n\r\n";
+        let mut reader = BufReader::new(&data[..]);
+
+        assert_eq!(
+            read_headers(&mut reader)?,
+            HashMap::from([(
+                String::from("Content-Type"),
+                HeaderValue::Single(String::from("text/plain"))
+            )])
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_read_headers_mutiple_headers_valid() -> Result<(), RequestError> {
+        let data = b"Accept: application/json\r\n\
+                                Content-Type: text/plain\r\n\
+                                Content-Length: 11\r\n\
+                                \r\n";
+        let mut reader = BufReader::new(&data[..]);
+
+        assert_eq!(
+            read_headers(&mut reader)?,
+            HashMap::from([
+                (
+                    String::from("Accept"),
+                    HeaderValue::Single(String::from("application/json"))
+                ),
+                (
+                    String::from("Content-Type"),
+                    HeaderValue::Single(String::from("text/plain"))
+                ),
+                (
+                    String::from("Content-Length"),
+                    HeaderValue::Single(String::from("11"))
+                )
+            ])
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_read_headers_with_ows_valid() -> Result<(), RequestError> {
+        let data = b"Content-Type:text/plain\r\n\
+                                     Content-Length:       11     \r\n\
+                                \r\n";
+        let mut reader = BufReader::new(&data[..]);
+
+        assert_eq!(
+            read_headers(&mut reader)?,
+            HashMap::from([
+                (
+                    String::from("Content-Type"),
+                    HeaderValue::Single(String::from("text/plain"))
+                ),
+                (
+                    String::from("Content-Length"),
+                    HeaderValue::Single(String::from("11"))
+                )
+            ])
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_read_headers_empty_value_invalid() {
+        let data = b"Content-Type:\r\n\
+                                \r\n";
+        let mut reader = BufReader::new(&data[..]);
+
+        assert_matches!(
+            read_headers(&mut reader),
+            Err(RequestError::InvalidHeaderValue)
+        );
+    }
+
+    #[test]
+    fn test_read_headers_with_missing_colon_invalid() {
+        let data = b"Content-Type:\r\n\
+                                \r\n";
+        let mut reader = BufReader::new(&data[..]);
+
+        assert_matches!(
+            read_headers(&mut reader),
+            Err(RequestError::InvalidHeaderValue)
         );
     }
 }

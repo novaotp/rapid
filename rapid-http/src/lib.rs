@@ -16,6 +16,7 @@
 
 //! Core primitives and utilities for the HTTP request/response lifecycle.
 
+pub mod header;
 pub mod method;
 pub mod request;
 pub mod version;

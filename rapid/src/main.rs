@@ -41,7 +41,9 @@ fn main() -> io::Result<()> {
                         RequestError::InvalidMethod => {
                             String::from("HTTP/1.1 405 Method Not Allowed\r\n\r\n")
                         }
-                        RequestError::Read(_) => String::from("HTTP/1.1 400 Bad Request\r\n\r\n"),
+                        RequestError::Read(_) | RequestError::InvalidHeaderValue => {
+                            String::from("HTTP/1.1 400 Bad Request\r\n\r\n")
+                        }
                     },
                 };
                 println!("{:#?}", response);

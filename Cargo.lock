@@ -5,3 +5,10 @@ version = 4
 [[package]]
 name = "rapid"
 version = "0.1.0"
+dependencies = [
+ "rapid-http",
+]
+
+[[package]]
+name = "rapid-http"
+version = "0.1.0"

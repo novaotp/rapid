@@ -2,3 +2,6 @@
 name = "rapid-http"
 version = "0.1.0"
 edition = "2024"
+
+[dependencies]
+percent-encoding = "2.3.2"

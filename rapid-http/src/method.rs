@@ -35,6 +35,27 @@ pub enum Method {
     TRACE,
 }
 
+impl Method {
+    /// Whether this method allows a body to be present and used or not.
+    ///
+    /// If `false`, the body should be ignored, even if present.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rapid_http::method::Method;
+    ///
+    /// assert!(!Method::GET.allows_body());
+    /// assert!(Method::POST.allows_body());
+    /// ```
+    pub fn allows_body(&self) -> bool {
+        matches!(
+            self,
+            Method::POST | Method::PUT | Method::PATCH | Method::QUERY
+        )
+    }
+}
+
 impl FromStr for Method {
     type Err = InvalidMethodError;
 
@@ -84,5 +105,20 @@ mod tests {
     #[test]
     fn test_invalid_method() {
         assert_matches!(Method::from_str("INVALID"), Err(InvalidMethodError));
+    }
+
+    #[test]
+    fn test_allows_body() {
+        assert!(Method::POST.allows_body());
+        assert!(Method::PUT.allows_body());
+        assert!(Method::PATCH.allows_body());
+        assert!(Method::QUERY.allows_body());
+
+        assert!(!Method::GET.allows_body());
+        assert!(!Method::HEAD.allows_body());
+        assert!(!Method::DELETE.allows_body());
+        assert!(!Method::OPTIONS.allows_body());
+        assert!(!Method::CONNECT.allows_body());
+        assert!(!Method::TRACE.allows_body());
     }
 }

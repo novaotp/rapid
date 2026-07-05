@@ -38,10 +38,19 @@ fn main() -> io::Result<()> {
                         RequestError::UnsupportedHttpVersion => {
                             String::from("HTTP/1.1 505 HTTP Version Not Supported\r\n\r\n")
                         }
+                        RequestError::InvalidMediaType => {
+                            String::from("HTTP/1.1 415 Unsupported Media Type\r\n\r\n")
+                        }
+                        RequestError::ContentLengthRequired => {
+                            String::from("HTTP/1.1 411 Length Required\r\n\r\n")
+                        }
                         RequestError::InvalidMethod => {
                             String::from("HTTP/1.1 405 Method Not Allowed\r\n\r\n")
                         }
-                        RequestError::Read(_) | RequestError::InvalidHeaderValue => {
+                        RequestError::InvalidBodyEncoding(_)
+                        | RequestError::Read(_)
+                        | RequestError::InvalidHeaderValue
+                        | RequestError::InvalidBodyLength(_) => {
                             String::from("HTTP/1.1 400 Bad Request\r\n\r\n")
                         }
                     },

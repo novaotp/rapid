@@ -17,7 +17,9 @@
 use std::{
     assert_matches,
     collections::HashMap,
-    io::{self, BufRead as _, BufReader},
+    io::{self, BufRead as _, BufReader, Read as _},
+    num::ParseIntError,
+    string::FromUtf8Error,
 };
 
 use crate::{header::HeaderValue, method::Method, version::Version};
@@ -29,6 +31,7 @@ pub struct Request {
     pub path: String,
     pub version: Version,
     pub headers: HashMap<String, HeaderValue>,
+    pub body: Option<String>,
 }
 
 impl Request {
@@ -47,33 +50,41 @@ impl Request {
     /// };
     ///
     /// # fn try_main() -> Result<(), rapid_http::request::RequestError> {
-    /// let data = b"GET / HTTP/1.1\r\n\
-    ///              Host: example.com
-    ///              Accept: text/plain, application/json
+    /// let data = b"POST / HTTP/1.1\r\n\
+    ///              Accept: text/plain, application/json\r\n\
+    ///              Content-Type: text/plain\r\n\
+    ///              Content-Length: 11\r\n\
+    ///              \r\n\
+    ///              Hello World\r\n\
     ///              \r\n";
     /// let mut reader = BufReader::new(&data[..]);
     ///
     /// let request = Request::from_reader(&mut reader)?;
     ///
-    /// assert_eq!(request.method, Method::GET);
+    /// assert_eq!(request.method, Method::POST);
     /// assert_eq!(request.path, String::from("/"));
     /// assert_eq!(request.version, Version::HTTP1_1);
     /// assert_eq!(
     ///     request.headers,
     ///     HashMap::from([
     ///         (
-    ///             String::from("Host"),
-    ///             HeaderValue::Single(String::from("example.com"))
-    ///         ),
-    ///         (
     ///             String::from("Accept"),
     ///             HeaderValue::Many(vec![
     ///                 String::from("text/plain"),
     ///                 String::from("application/json")
     ///             ])
-    ///         )
+    ///         ),
+    ///         (
+    ///             String::from("Content-Type"),
+    ///             HeaderValue::Single(String::from("text/plain"))
+    ///         ),
+    ///         (
+    ///             String::from("Content-Length"),
+    ///             HeaderValue::Single(String::from("11"))
+    ///         ),
     ///     ])
     /// );
+    /// assert_eq!(request.body, Some(String::from("Hello World")));
     /// # Ok(())
     /// # }
     /// # fn main() {
@@ -87,12 +98,14 @@ impl Request {
     pub fn from_reader<T: io::Read>(reader: &mut BufReader<T>) -> Result<Self, RequestError> {
         let (method, path, version) = read_start_line(reader)?;
         let headers = read_headers(reader)?;
+        let body = get_body(reader, &method, &headers)?;
 
         Ok(Request {
             method,
             path,
             version,
             headers,
+            body,
         })
     }
 }
@@ -151,6 +164,52 @@ fn read_headers<T: io::Read>(
     Ok(headers)
 }
 
+fn get_body<T: io::Read>(
+    reader: &mut BufReader<T>,
+    method: &Method,
+    headers: &HashMap<String, HeaderValue>,
+) -> Result<Option<String>, RequestError> {
+    if !method.allows_body() {
+        return Ok(None);
+    } else if headers.get("Transfer-Encoding").is_some() {
+        // TODO : Supported `Transfer-Encoding`
+        return Err(RequestError::InvalidMediaType);
+    }
+
+    // TODO : Support other content types
+    if !matches!(headers.get("Content-Type"), Some(HeaderValue::Single(val)) if val.as_str() == "text/plain")
+    {
+        return Err(RequestError::InvalidMediaType);
+    }
+
+    let length_header = headers
+        .get("Content-Length")
+        .ok_or(RequestError::ContentLengthRequired)?;
+
+    let length = match length_header {
+        HeaderValue::Single(len) => len.parse::<usize>()?,
+        HeaderValue::Many(_) => return Err(RequestError::InvalidHeaderValue),
+    };
+
+    read_body_with_content_length(reader, length)
+}
+
+fn read_body_with_content_length<T: io::Read>(
+    reader: &mut BufReader<T>,
+    length: usize,
+) -> Result<Option<String>, RequestError> {
+    if length == 0 {
+        return Ok(None);
+    }
+
+    let mut buf = vec![0u8; length];
+    reader.read_exact(&mut buf)?;
+
+    let body = String::from_utf8(buf)?;
+
+    Ok(Some(body))
+}
+
 /// All errors that can arise from [Request::parse].
 #[derive(Debug)]
 pub enum RequestError {
@@ -165,11 +224,37 @@ pub enum RequestError {
     /// - `Host:` is invalid because there is no  value after the colon.
     /// - `X-Rapid-Server` is invalid because there is no colon.
     InvalidHeaderValue,
+    /// The body's encoding was expected to be UTF-8 but received another encoding.
+    InvalidBodyEncoding(FromUtf8Error),
+    /// Invalid value (not integer) for either `Content-Length` or the bytes from a `Transfert-Encoding: chunked` request chunk.
+    InvalidBodyLength(ParseIntError),
+    /// The message content format is not supported.
+    ///
+    /// The problem is due to the request's indicated `Content-Type`, `Content-Encoding` or `Transfer-Encoding`.
+    ///
+    /// NOTE : Right now, only `Content-Type: text/plain` is supported.
+    InvalidMediaType,
+    /// The `Content-Length` header was expected (because the HTTP method requires it) but was not found.
+    ///
+    /// This can only happen if `Transfer-Encoding` was also unset.
+    ContentLengthRequired,
 }
 
 impl From<io::Error> for RequestError {
     fn from(err: io::Error) -> Self {
         RequestError::Read(err)
+    }
+}
+
+impl From<FromUtf8Error> for RequestError {
+    fn from(err: FromUtf8Error) -> Self {
+        RequestError::InvalidBodyEncoding(err)
+    }
+}
+
+impl From<ParseIntError> for RequestError {
+    fn from(err: ParseIntError) -> Self {
+        RequestError::InvalidBodyLength(err)
     }
 }
 
@@ -292,5 +377,41 @@ mod tests {
             read_headers(&mut reader),
             Err(RequestError::InvalidHeaderValue)
         );
+    }
+
+    #[test]
+    fn test_read_body_with_content_length_valid() -> Result<(), RequestError> {
+        let data = b"Hello World\r\n\r\n";
+        let mut reader = BufReader::new(&data[..]);
+
+        assert_eq!(
+            read_body_with_content_length(&mut reader, data.len())?,
+            Some(String::from_utf8_lossy(data).into_owned())
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_read_body_with_content_length_zero() -> Result<(), RequestError> {
+        let data = b"Hello World\r\n\r\n";
+        let mut reader = BufReader::new(&data[..]);
+
+        assert_eq!(read_body_with_content_length(&mut reader, 0)?, None);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_read_body_with_content_length_not_matching() -> Result<(), RequestError> {
+        let data = b"Hello World\r\n\r\n";
+        let mut reader = BufReader::new(&data[..]);
+
+        assert!(matches!(
+            read_body_with_content_length(&mut reader, data.len() + 3),
+            Err(RequestError::Read(_))
+        ));
+
+        Ok(())
     }
 }

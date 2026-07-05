@@ -14,10 +14,8 @@
  * limitations under the License.
  */
 
-//! Core primitives and utilities for the HTTP request/response lifecycle.
-
-pub mod header;
-pub mod method;
-pub mod query;
-pub mod request;
-pub mod version;
+#[derive(Debug)]
+pub enum QueryValue {
+    Single(String),
+    Many(Vec<String>),
+}

@@ -22,7 +22,9 @@ use std::{
     string::FromUtf8Error,
 };
 
-use crate::{header::HeaderValue, method::Method, version::Version};
+use percent_encoding::percent_decode_str;
+
+use crate::{header::HeaderValue, method::Method, query::QueryValue, version::Version};
 
 /// An HTTP request.
 #[derive(Debug)]
@@ -31,6 +33,7 @@ pub struct Request {
     pub path: String,
     pub version: Version,
     pub headers: HashMap<String, HeaderValue>,
+    pub query: HashMap<String, QueryValue>,
     pub body: Option<String>,
 }
 
@@ -85,6 +88,7 @@ impl Request {
     ///     ])
     /// );
     /// assert_eq!(request.body, Some(String::from("Hello World")));
+    /// assert_eq!(request.query, HashMap::new());
     /// # Ok(())
     /// # }
     /// # fn main() {
@@ -96,8 +100,9 @@ impl Request {
     ///
     /// See [RequestError] for more details.
     pub fn from_reader<T: io::Read>(reader: &mut BufReader<T>) -> Result<Self, RequestError> {
-        let (method, path, version) = read_start_line(reader)?;
+        let (method, path, query_string, version) = read_start_line(reader)?;
         let headers = read_headers(reader)?;
+        let query = parse_query_string(&query_string);
         let body = get_body(reader, &method, &headers)?;
 
         Ok(Request {
@@ -105,6 +110,7 @@ impl Request {
             path,
             version,
             headers,
+            query,
             body,
         })
     }
@@ -112,7 +118,7 @@ impl Request {
 
 fn read_start_line<T: io::Read>(
     reader: &mut BufReader<T>,
-) -> Result<(Method, String, Version), RequestError> {
+) -> Result<(Method, String, Option<String>, Version), RequestError> {
     let mut line = String::new();
     reader.read_line(&mut line)?;
 
@@ -122,13 +128,16 @@ fn read_start_line<T: io::Read>(
                 .parse::<Method>()
                 .map_err(|_| RequestError::InvalidMethod)?;
 
-            let path = path_str.to_string();
+            let (path, query_string) = match path_str.split_once("?") {
+                Some((p, q)) => (p.to_owned(), Some(q.to_owned())),
+                None => (path_str.to_string(), None),
+            };
 
             let version = version_str
                 .parse::<Version>()
                 .map_err(|_| RequestError::UnsupportedHttpVersion)?;
 
-            Ok((method, path, version))
+            Ok((method, path, query_string, version))
         }
         _ => Err(RequestError::UnsupportedHttpVersion),
     }
@@ -162,6 +171,48 @@ fn read_headers<T: io::Read>(
     }
 
     Ok(headers)
+}
+
+fn parse_query_string(query_string: &str) -> Result<HashMap<String, QueryValue>, RequestError> {
+    let mut query: HashMap<String, QueryValue> = HashMap::new();
+
+    if query_string.is_empty() {
+        return Ok(query);
+    }
+
+    let v = percent_decode_str(query_string).decode_utf8()?;
+    println!("{:#?}", v);
+
+    // for item in query_string.split('&') {
+    //     if let Some((key, val)) = item.split_once('=') {
+    //         if key.ends_with("[]") || key.ends_with("%5B%5D") {
+    //             let key = key
+    //                 .strip_suffix("[]")
+    //                 .or_else(|| key.strip_suffix("%5B%5D"))
+    //                 .unwrap_or(key);
+
+    //             query
+    //                 .entry(key.to_owned())
+    //                 .and_modify(|e| match e {
+    //                     QueryValue::Many(v) => v.push(val.to_owned()),
+    //                     QueryValue::Single(_) => panic!("Impossible !"),
+    //                 })
+    //                 .or_insert(QueryValue::Many(vec![val.to_owned()]));
+    //         } else {
+    //             query
+    //                 .entry(key.to_owned())
+    //                 .and_modify(|e| match e {
+    //                     QueryValue::Single(_) => {
+    //                         *e = QueryValue::Single(val.to_owned());
+    //                     }
+    //                     QueryValue::Many(_) => panic!("Impossible !"),
+    //                 })
+    //                 .or_insert(QueryValue::Single(val.to_owned()));
+    //         }
+    //     }
+    // }
+
+    Ok(query)
 }
 
 fn get_body<T: io::Read>(
@@ -243,6 +294,12 @@ pub enum RequestError {
 impl From<io::Error> for RequestError {
     fn from(err: io::Error) -> Self {
         RequestError::Read(err)
+    }
+}
+
+impl From<str::FromUtf8Error> for RequestError {
+    fn from(err: str::FromUtf8Error) -> Self {
+        RequestError::InvalidBodyEncoding(err)
     }
 }
 
